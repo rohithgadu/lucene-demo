@@ -1,0 +1,1 @@
+http://localhost:8080/searchField?queryString=tag_assessmentToolName:"cobalt" AND tag_itemSeverity: "high" AND tag_scanFullDate:[2022-01-01 TO 2024-12-31]&secondQueryString=
