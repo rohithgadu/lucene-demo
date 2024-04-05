@@ -40,7 +40,7 @@ public class LuceneIndexService {
         Path path = Paths.get("indexes");
         memoryIndex = FSDirectory.open(path);
         analyzer = new CustomAnalyzer();
-//        indexData();
+        indexData();
     }
 
     public void indexData() {
@@ -70,7 +70,11 @@ public class LuceneIndexService {
                                     long timestamp = zonedDateTime.toInstant().toEpochMilli();
                                     document.add(new LongPoint("tag_" + tag.getKey(), timestamp));
                                     document.add(new StoredField("tag_" + tag.getKey() + "_string", dateValue));
-                                }else {
+                                } else if (tag.getKey().equals("primaryVulnerabilitycvssScore") || tag.getKey().equals("epssScore")){
+                                    double score = tag.getValue().isEmpty() ? 0 : Double.parseDouble(tag.getValue());
+                                    document.add(new DoublePoint("tag_" + tag.getKey(), score));
+                                }
+                                else {
                                     document.add(new TextField("tag_" + tag.getKey(), tag.getValue().toLowerCase(), Field.Store.YES));
                                 }
                             }
@@ -229,7 +233,7 @@ public class LuceneIndexService {
         return results;
     }
 
-    public Long searchField(String queryString,String secondQueryString,String dateRange) {
+    public Long searchField(String queryString,String secondQueryString,String dateRange, List<Double> scoreRange) {
         List<ItemResult> results = new ArrayList<>();
         long totalHits = 0L;
         IndexReader reader = null;
@@ -276,6 +280,14 @@ public class LuceneIndexService {
                 combinedQuery.add(dateRangeQuery, BooleanClause.Occur.MUST);
             }
 
+            if (!scoreRange.isEmpty()){
+                double min = scoreRange.get(0);
+                double max = scoreRange.get(1);
+
+                Query scoreRangeQuery = DoublePoint.newRangeQuery("tag_primaryVulnerabilitycvssScore", min, max);
+                combinedQuery.add(scoreRangeQuery, BooleanClause.Occur.MUST);
+            }
+
 
             System.out.println(combinedQuery.build());
 
@@ -300,46 +312,3 @@ public class LuceneIndexService {
     }
 
 }
-
-
-
-
-
-
-
-
-
-// Iterate over the retrieved documents
-//            for (ScoreDoc scoreDoc : topDocs.scoreDocs) {
-//                Document doc = searcher.doc(scoreDoc.doc);
-//
-//                ItemResult itemResult = new ItemResult();
-//                itemResult.setId(doc.get("id"));
-//                itemResult.setMessage(doc.get("message"));
-//
-//                // Retrieve tags
-//                Map<String, String> tags = new HashMap<>();
-//                for (IndexableField field : doc.getFields()) {
-//                    String fieldName = field.name();
-//                    if (fieldName.startsWith("tag_")) {
-//                        String tagName = fieldName.substring(4); // remove "tag_" prefix
-//                        tags.put(tagName, field.stringValue());
-//                    }
-//                }
-//                itemResult.setTags(tags);
-//
-//                // Retrieve filterTags
-//                List<Map<String, String>> filterTags = new ArrayList<>();
-//                for (IndexableField field : doc.getFields()) {
-//                    String fieldName = field.name();
-//                    if (fieldName.startsWith("filterTag_")) {
-//                        String filterTagName = fieldName.substring(10); // remove "filterTag_" prefix
-//                        Map<String, String> filterTag = new HashMap<>();
-//                        filterTag.put(filterTagName, field.stringValue());
-//                        filterTags.add(filterTag);
-//                    }
-//                }
-//                itemResult.setFilterTags(filterTags);
-//
-//                results.add(itemResult);
-//            }
