@@ -31,6 +31,7 @@ public class LuceneIndexService {
     private Directory memoryIndex;
     private Analyzer analyzer;
     private static final String INDEXED_IDS_FILE = "indexed_ids.txt";
+    private static final String RESULT_IDS = "result_ids.txt";
 
     @Autowired
     private ItemResultRepository itemResultRepository;
@@ -40,7 +41,7 @@ public class LuceneIndexService {
         Path path = Paths.get("indexes");
         memoryIndex = FSDirectory.open(path);
         analyzer = new CustomAnalyzer();
-        indexData();
+//        indexData();
     }
 
     public void indexData() {
@@ -249,7 +250,7 @@ public class LuceneIndexService {
             combinedQuery.add(queryStringQuery, BooleanClause.Occur.MUST);
 
             if(!secondQueryString.isEmpty()){
-                String[] words = secondQueryString.split("\\s+");
+                String[] words = secondQueryString.toLowerCase().split("\\s+");
                 String field = "tag_primaryVulnerabilityDescription";
                 for (String word : words) {
                     FuzzyQuery fuzzyQuery = new FuzzyQuery(new Term(field, word), 2); // 2 is the maximum edit distance
@@ -295,6 +296,26 @@ public class LuceneIndexService {
             TopDocs topDocs = searcher.search(combinedQuery.build(), Integer.MAX_VALUE);
 
             totalHits = topDocs.totalHits.value;
+
+            List<String> resultMap = new ArrayList<>();
+
+            // Iterate over the retrieved documents
+            for (ScoreDoc scoreDoc : topDocs.scoreDocs) {
+                Document doc = searcher.doc(scoreDoc.doc);
+
+                String id = doc.get("id");
+                String description = doc.get("tag_primaryVulnerabilityDescription");
+
+                resultMap.add(id + "\t" + description);
+            }
+
+            if (!resultMap.isEmpty()) {
+                try {
+                    Files.write(Paths.get(RESULT_IDS), resultMap);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
 
         } catch (Exception e) {
             e.printStackTrace();
