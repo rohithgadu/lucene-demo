@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -31,6 +32,7 @@ public class LuceneIndexService {
     private Directory memoryIndex;
     private Analyzer analyzer;
     private static final String INDEXED_IDS_FILE = "indexed_ids.txt";
+    private static final String RESULT_IDS = "result_ids.txt";
 
     @Autowired
     private ItemResultRepository itemResultRepository;
@@ -45,40 +47,48 @@ public class LuceneIndexService {
 
     public void indexData() {
         Set<String> indexedIds = loadIndexedIds(); // Load previously indexed document IDs
-        try (IndexWriter indexWriter = new IndexWriter(memoryIndex, new IndexWriterConfig(analyzer))) {
-            int pageNumber = 0;
-            int pageSize = 1000;
-            Pageable pageable = PageRequest.of(pageNumber, pageSize);
-            Page<ItemResult> page;
-            do {
-                page = itemResultRepository.findAll(pageable);
-                page.forEach(data -> {
+        int pageNumber = 0;
+        int pageSize = 1000;
+        boolean newDocumentsIndexed = true; // Flag to track if new documents are indexed
+        while (newDocumentsIndexed) {
+            Pageable pageable = PageRequest.of(pageNumber, pageSize, Sort.by(Sort.Direction.DESC, "id"));
+            Page<ItemResult> latestItems = itemResultRepository.findAll(pageable);
+            if (latestItems.isEmpty()) {
+                // No more items to index, exit loop
+                break;
+            }
+
+            try (IndexWriter indexWriter = new IndexWriter(memoryIndex, new IndexWriterConfig(analyzer))) {
+                newDocumentsIndexed = false; // Reset the flag before iterating through items
+                for (ItemResult data : latestItems) {
                     if (!indexedIds.contains(data.getId())) { // Check if the document ID is already indexed
                         Document document = new Document();
-
+                        // Add fields to the document
                         document.add(new TextField("id", data.getId(), Field.Store.YES));
-
                         document.add(new TextField("message", data.getMessage(), Field.Store.YES));
-
+                        // Add tags to the document
                         Map<String, String> tags = data.getTags();
                         if (tags != null) {
                             for (Map.Entry<String, String> tag : tags.entrySet()) {
                                 if (tag.getKey().equals("scanFullDate")) {
+                                    // Handle date tags
                                     String dateValue = tag.getValue();
                                     DateTimeFormatter formatter = DateTimeFormatter.ofPattern("EEE MMM dd HH:mm:ss zzz yyyy", Locale.ENGLISH);
                                     ZonedDateTime zonedDateTime = ZonedDateTime.parse(dateValue, formatter);
                                     long timestamp = zonedDateTime.toInstant().toEpochMilli();
                                     document.add(new LongPoint("tag_" + tag.getKey(), timestamp));
                                     document.add(new StoredField("tag_" + tag.getKey() + "_string", dateValue));
-                                } else if (tag.getKey().equals("primaryVulnerabilitycvssScore") || tag.getKey().equals("epssScore")){
+                                } else if (tag.getKey().equals("primaryVulnerabilitycvssScore") || tag.getKey().equals("epssScore")) {
+                                    // Handle numeric tags
                                     double score = tag.getValue().isEmpty() ? 0 : Double.parseDouble(tag.getValue());
                                     document.add(new DoublePoint("tag_" + tag.getKey(), score));
-                                }
-                                else {
+                                } else {
+                                    // Handle other tags
                                     document.add(new TextField("tag_" + tag.getKey(), tag.getValue().toLowerCase(), Field.Store.YES));
                                 }
                             }
                         }
+                        // Add filter tags to the document
                         List<Map<String, String>> filterTags = data.getFilterTags();
                         if (filterTags != null) {
                             for (Map<String, String> filterTag : filterTags) {
@@ -87,27 +97,27 @@ public class LuceneIndexService {
                                 }
                             }
                         }
-
                         try {
+                            // Add the document to the index
                             indexWriter.addDocument(document);
                             indexedIds.add(data.getId()); // Update indexed IDs set
                             System.out.println("Indexed document: " + data.getId());
+                            newDocumentsIndexed = true; // Set the flag to true if new documents are indexed
                         } catch (IOException e) {
                             e.printStackTrace();
                         }
                     }
-                });
-//                if (pageNumber % 1000 == 0) {
-//                    System.out.println("Indexed " + pageNumber + " documents");
-//                }
-//                pageNumber += 1000;
-                pageable = page.nextPageable();
-            } while (page.hasNext());
-        } catch (IOException e) {
-            e.printStackTrace();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            pageNumber++; // Move to the next page for the next iteration
         }
+
         saveIndexedIds(indexedIds); // Save updated indexed IDs to file
     }
+
+
 
     private Set<String> loadIndexedIds() {
         Set<String> indexedIds = new HashSet<>();
@@ -249,7 +259,7 @@ public class LuceneIndexService {
             combinedQuery.add(queryStringQuery, BooleanClause.Occur.MUST);
 
             if(!secondQueryString.isEmpty()){
-                String[] words = secondQueryString.split("\\s+");
+                String[] words = secondQueryString.toLowerCase().split("\\s+");
                 String field = "tag_primaryVulnerabilityDescription";
                 for (String word : words) {
                     FuzzyQuery fuzzyQuery = new FuzzyQuery(new Term(field, word), 2); // 2 is the maximum edit distance
@@ -295,6 +305,26 @@ public class LuceneIndexService {
             TopDocs topDocs = searcher.search(combinedQuery.build(), Integer.MAX_VALUE);
 
             totalHits = topDocs.totalHits.value;
+
+            List<String> resultMap = new ArrayList<>();
+
+            // Iterate over the retrieved documents
+            for (ScoreDoc scoreDoc : topDocs.scoreDocs) {
+                Document doc = searcher.doc(scoreDoc.doc);
+
+                String id = doc.get("id");
+                String description = doc.get("tag_primaryVulnerabilityDescription");
+
+                resultMap.add(id + "\t" + description);
+            }
+
+            if (!resultMap.isEmpty()) {
+                try {
+                    Files.write(Paths.get(RESULT_IDS), resultMap);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
 
         } catch (Exception e) {
             e.printStackTrace();

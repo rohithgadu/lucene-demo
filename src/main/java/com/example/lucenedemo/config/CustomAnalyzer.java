@@ -11,8 +11,8 @@ public class CustomAnalyzer extends Analyzer {
     protected TokenStreamComponents createComponents(String fieldName) {
         StandardTokenizer tokenizer = new StandardTokenizer();
         TokenStream tokenStream = tokenizer;
-        tokenStream = new EdgeNGramTokenFilter(tokenStream, 3, 8, true);
         tokenStream = new LowerCaseFilter(tokenStream);
+        tokenStream = new EdgeNGramTokenFilter(tokenStream, 3, 8, true);
 //        tokenStream = new PhoneticFilter(tokenStream, new DoubleMetaphone(), false);
         return new TokenStreamComponents(tokenizer, tokenStream);
     }
