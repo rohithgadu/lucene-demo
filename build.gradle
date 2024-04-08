@@ -30,6 +30,8 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     implementation group: 'org.apache.lucene', name: 'lucene-core', version: '9.10.0'
     implementation 'org.apache.lucene:lucene-queryparser:9.10.0'
+    implementation group: 'org.apache.lucene', name: 'lucene-analysis-common', version: '9.10.0'
+//    implementation group: 'org.apache.lucene', name: 'lucene-analyzers-phonetic', version: '8.11.3'
 //    implementation files('/home/rohithgadu/IdeaProjects/lucene-demo/lucene-core-9.10.1-SNAPSHOT.jar')
 }
 
