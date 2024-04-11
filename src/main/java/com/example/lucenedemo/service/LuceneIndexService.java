@@ -42,7 +42,7 @@ public class LuceneIndexService {
         Path path = Paths.get("indexes");
         memoryIndex = FSDirectory.open(path);
         analyzer = new CustomAnalyzer();
-        indexData();
+//        indexData();
     }
 
     public void indexData() {
