@@ -6,7 +6,9 @@ import com.example.lucenedemo.model.ItemResult;
 import com.example.lucenedemo.repository.ItemResultRepository;
 import jakarta.annotation.PostConstruct;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
+import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.document.*;
 import org.apache.lucene.index.*;
 import org.apache.lucene.queryparser.classic.QueryParser;
@@ -24,6 +26,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -273,9 +276,16 @@ public class LuceneIndexService {
             combinedQuery.add(queryStringQuery, BooleanClause.Occur.MUST);
 
             if (!secondQueryString.isEmpty()) {
-                String[] words = secondQueryString.toLowerCase().split("\\s+");
                 String field = "tag_primaryVulnerabilityDescription";
-                for (String word : words) {
+                // Tokenize the secondQueryString using the CustomAnalyzer
+                TokenStream tokenStream = analyzer.tokenStream(field, new StringReader(secondQueryString));
+                CharTermAttribute charTermAttribute = tokenStream.addAttribute(CharTermAttribute.class);
+                tokenStream.reset();
+
+                // Iterate over the tokens
+                while (tokenStream.incrementToken()) {
+                    String word = charTermAttribute.toString();
+
                     try {
                         // Check if the word is in the Index for that Field
                         Term term = new Term(field, word);
@@ -284,7 +294,6 @@ public class LuceneIndexService {
                         if (docFreq > 0) {
                             System.out.println("Word exists in the dictionary: " + word);
                             // If the word is in the dictionary, add it to the combined query
-//                                FuzzyQuery fuzzyQuery = new FuzzyQuery(new Term(field, word), 2); // 2 is the maximum edit distance
                             PhraseQuery phraseQuery = new PhraseQuery(field, word);
                             combinedQuery.add(phraseQuery, BooleanClause.Occur.MUST);
                         } else {
@@ -293,7 +302,7 @@ public class LuceneIndexService {
                             System.out.println(Arrays.toString(suggestions));
                             for (String suggestion : suggestions) {
                                 // Create a FuzzyQuery for each suggestion and add it to the combined query
-                                FuzzyQuery fuzzyQuery = new FuzzyQuery(new Term(field, suggestion), 2); // 2 is the maximum edit distance
+                                FuzzyQuery fuzzyQuery = new FuzzyQuery(new Term("tag_primaryVulnerabilityDescription", suggestion), 2); // 2 is the maximum edit distance
                                 combinedQuery.add(fuzzyQuery, BooleanClause.Occur.MUST);
                             }
                         }
@@ -301,6 +310,9 @@ public class LuceneIndexService {
                         e.printStackTrace();
                     }
                 }
+
+                tokenStream.end();
+                tokenStream.close();
             }
 
             if (!dateRange.isEmpty()) {
