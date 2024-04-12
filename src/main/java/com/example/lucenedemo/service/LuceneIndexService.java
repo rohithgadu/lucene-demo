@@ -272,35 +272,17 @@ public class LuceneIndexService {
             BooleanQuery.Builder combinedQuery = new BooleanQuery.Builder();
             combinedQuery.add(queryStringQuery, BooleanClause.Occur.MUST);
 
-//            if(!secondQueryString.isEmpty()){
-//                String[] words = secondQueryString.toLowerCase().split("\\s+");
-//                String field = "tag_primaryVulnerabilityDescription";
-//                for (String word : words) {
-//                    QueryParser nGramQueryParser = new QueryParser(field, new NGramAnalyzer(3, 8, true));
-//                    Query nGramQuery = nGramQueryParser.parse(word);
-//                    System.out.println(nGramQuery);
-//                    combinedQuery.add(nGramQuery, BooleanClause.Occur.MUST);
-//                }
-//            }
-
-//            if(!secondQueryString.isEmpty()){
-//                String[] words = secondQueryString.toLowerCase().split("\\s+");
-//                String field = "tag_primaryVulnerabilityDescription";
-//                for (String word : words) {
-//                    FuzzyQuery fuzzyQuery = new FuzzyQuery(new Term(field, word), 2); // 2 is the maximum edit distance
-//                    combinedQuery.add(fuzzyQuery, BooleanClause.Occur.MUST);
-//                }
-//            }
-
             if (!secondQueryString.isEmpty()) {
                 String[] words = secondQueryString.toLowerCase().split("\\s+");
                 String field = "tag_primaryVulnerabilityDescription";
                 for (String word : words) {
-                    // Check if the word contains any numeric values
                     try {
-                        // Check if the word is in the SpellChecker dictionary
-                        boolean exists = spellChecker.exist(word);
-                        if (exists) {
+                        // Check if the word is in the Index for that Field
+                        Term term = new Term(field, word);
+                        int docFreq = reader.docFreq(term);
+
+                        if (docFreq > 0) {
+                            System.out.println("Word exists in the dictionary: " + word);
                             // If the word is in the dictionary, add it to the combined query
 //                                FuzzyQuery fuzzyQuery = new FuzzyQuery(new Term(field, word), 2); // 2 is the maximum edit distance
                             PhraseQuery phraseQuery = new PhraseQuery(field, word);
