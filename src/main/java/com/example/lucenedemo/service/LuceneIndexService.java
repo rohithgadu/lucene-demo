@@ -1,14 +1,20 @@
 package com.example.lucenedemo.service;
 
 import com.example.lucenedemo.config.CustomAnalyzer;
+import com.example.lucenedemo.config.NGramAnalyzer;
 import com.example.lucenedemo.model.ItemResult;
 import com.example.lucenedemo.repository.ItemResultRepository;
 import jakarta.annotation.PostConstruct;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
 import org.apache.lucene.document.*;
 import org.apache.lucene.index.*;
+import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
 import org.apache.lucene.search.*;
+import org.apache.lucene.search.spell.Dictionary;
+import org.apache.lucene.search.spell.HighFrequencyDictionary;
+import org.apache.lucene.search.spell.SpellChecker;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +36,7 @@ public class LuceneIndexService {
 
     private Directory memoryIndex;
     private Analyzer analyzer;
+    private SpellChecker spellChecker;
     private static final String INDEXED_IDS_FILE = "indexed_ids.txt";
     private static final String RESULT_IDS = "result_ids.txt";
 
@@ -42,13 +49,34 @@ public class LuceneIndexService {
         memoryIndex = FSDirectory.open(path);
         analyzer = new CustomAnalyzer();
 //        indexData();
+        initSpellChecker();
+    }
+
+    public void initSpellChecker() throws IOException {
+        // Open the main index
+        Directory mainDirectory = memoryIndex;
+        IndexReader mainIndexReader = DirectoryReader.open(mainDirectory);
+
+        // Create a new spell checker with a new index
+        Path spellIndexPath = Paths.get("spellIndexes");
+        Directory spellDirectory = FSDirectory.open(spellIndexPath);
+        spellChecker = new SpellChecker(spellDirectory);
+
+        // Create a dictionary from the "tag_primaryVulnerabilityDescription" field of the main index
+        String field = "tag_primaryVulnerabilityDescription";
+        Dictionary dictionary = new HighFrequencyDictionary(mainIndexReader, field, 0.0f);
+
+        // Index the dictionary
+        spellChecker.indexDictionary(dictionary, new IndexWriterConfig(analyzer), true);
+
+        mainIndexReader.close();
     }
 
     public void indexData() {
         Set<String> indexedIds = loadIndexedIds(); // Load previously indexed document IDs
         try (IndexWriter indexWriter = new IndexWriter(memoryIndex, new IndexWriterConfig(analyzer))) {
             int pageNumber = 0;
-            int pageSize = 1000;
+            int pageSize = 2000;
             Pageable pageable = PageRequest.of(pageNumber, pageSize);
             Page<ItemResult> page;
             do {
@@ -71,11 +99,10 @@ public class LuceneIndexService {
                                     long timestamp = zonedDateTime.toInstant().toEpochMilli();
                                     document.add(new LongPoint("tag_" + tag.getKey(), timestamp));
                                     document.add(new StoredField("tag_" + tag.getKey() + "_string", dateValue));
-                                } else if (tag.getKey().equals("primaryVulnerabilitycvssScore") || tag.getKey().equals("epssScore")){
+                                } else if (tag.getKey().equals("primaryVulnerabilitycvssScore") || tag.getKey().equals("epssScore")) {
                                     double score = tag.getValue().isEmpty() ? 0 : Double.parseDouble(tag.getValue());
                                     document.add(new DoublePoint("tag_" + tag.getKey(), score));
-                                }
-                                else {
+                                } else {
                                     document.add(new TextField("tag_" + tag.getKey(), tag.getValue().toLowerCase(), Field.Store.YES));
                                 }
                             }
@@ -98,10 +125,6 @@ public class LuceneIndexService {
                         }
                     }
                 });
-//                if (pageNumber % 1000 == 0) {
-//                    System.out.println("Indexed " + pageNumber + " documents");
-//                }
-//                pageNumber += 1000;
                 pageable = page.nextPageable();
             } while (page.hasNext());
         } catch (IOException e) {
@@ -128,7 +151,7 @@ public class LuceneIndexService {
             e.printStackTrace();
         }
     }
-    
+
     public List<ItemResult> search(String queryString) {
         List<ItemResult> results = new ArrayList<>();
         IndexReader reader = null;
@@ -234,7 +257,7 @@ public class LuceneIndexService {
         return results;
     }
 
-    public Long searchField(String queryString,String secondQueryString,String dateRange, List<Double> scoreRange) {
+    public Long searchField(String queryString, String secondQueryString, String dateRange, List<Double> scoreRange) {
         List<ItemResult> results = new ArrayList<>();
         long totalHits = 0L;
         IndexReader reader = null;
@@ -243,22 +266,62 @@ public class LuceneIndexService {
             IndexSearcher searcher = new IndexSearcher(reader);
 
             StandardQueryParser queryParser = new StandardQueryParser(analyzer);
-            Query queryStringQuery = queryParser.parse(queryString,"");
+            Query queryStringQuery = queryParser.parse(queryString, "");
 
             // Combine the queries using a BooleanQuery
             BooleanQuery.Builder combinedQuery = new BooleanQuery.Builder();
             combinedQuery.add(queryStringQuery, BooleanClause.Occur.MUST);
 
-            if(!secondQueryString.isEmpty()){
+//            if(!secondQueryString.isEmpty()){
+//                String[] words = secondQueryString.toLowerCase().split("\\s+");
+//                String field = "tag_primaryVulnerabilityDescription";
+//                for (String word : words) {
+//                    QueryParser nGramQueryParser = new QueryParser(field, new NGramAnalyzer(3, 8, true));
+//                    Query nGramQuery = nGramQueryParser.parse(word);
+//                    System.out.println(nGramQuery);
+//                    combinedQuery.add(nGramQuery, BooleanClause.Occur.MUST);
+//                }
+//            }
+
+//            if(!secondQueryString.isEmpty()){
+//                String[] words = secondQueryString.toLowerCase().split("\\s+");
+//                String field = "tag_primaryVulnerabilityDescription";
+//                for (String word : words) {
+//                    FuzzyQuery fuzzyQuery = new FuzzyQuery(new Term(field, word), 2); // 2 is the maximum edit distance
+//                    combinedQuery.add(fuzzyQuery, BooleanClause.Occur.MUST);
+//                }
+//            }
+
+            if (!secondQueryString.isEmpty()) {
                 String[] words = secondQueryString.toLowerCase().split("\\s+");
                 String field = "tag_primaryVulnerabilityDescription";
                 for (String word : words) {
-                    FuzzyQuery fuzzyQuery = new FuzzyQuery(new Term(field, word), 2); // 2 is the maximum edit distance
-                    combinedQuery.add(fuzzyQuery, BooleanClause.Occur.MUST);
+                    // Check if the word contains any numeric values
+                    try {
+                        // Check if the word is in the SpellChecker dictionary
+                        boolean exists = spellChecker.exist(word);
+                        if (exists) {
+                            // If the word is in the dictionary, add it to the combined query
+//                                FuzzyQuery fuzzyQuery = new FuzzyQuery(new Term(field, word), 2); // 2 is the maximum edit distance
+                            PhraseQuery phraseQuery = new PhraseQuery(field, word);
+                            combinedQuery.add(phraseQuery, BooleanClause.Occur.MUST);
+                        } else {
+                            // If the word is not in the dictionary, get suggestions for the current word
+                            String[] suggestions = spellChecker.suggestSimilar(word, 1);
+                            System.out.println(Arrays.toString(suggestions));
+                            for (String suggestion : suggestions) {
+                                // Create a FuzzyQuery for each suggestion and add it to the combined query
+                                FuzzyQuery fuzzyQuery = new FuzzyQuery(new Term(field, suggestion), 2); // 2 is the maximum edit distance
+                                combinedQuery.add(fuzzyQuery, BooleanClause.Occur.MUST);
+                            }
+                        }
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
                 }
             }
 
-            if(!dateRange.isEmpty()){
+            if (!dateRange.isEmpty()) {
                 String[] dateRangeArray = dateRange.split(" ");
                 String startDate = dateRangeArray[0];
                 String endDate = dateRangeArray[1];
@@ -281,7 +344,7 @@ public class LuceneIndexService {
                 combinedQuery.add(dateRangeQuery, BooleanClause.Occur.MUST);
             }
 
-            if (!scoreRange.isEmpty()){
+            if (!scoreRange.isEmpty()) {
                 double min = scoreRange.get(0);
                 double max = scoreRange.get(1);
 
@@ -306,7 +369,7 @@ public class LuceneIndexService {
                 String id = doc.get("id");
                 String description = doc.get("tag_primaryVulnerabilityDescription");
 
-                resultMap.add(id + "\t" + description);
+                resultMap.add(id + "\t" + scoreDoc.score + "\t" + description);
             }
 
             if (!resultMap.isEmpty()) {
